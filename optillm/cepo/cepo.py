@@ -302,7 +302,7 @@ def llm_call_reason_effort_fallback(
     for effort in reasoning_effort_levels:
         try:
             # Try with the current reasoning effort level
-            provider_request["reasoning_effort"] = effort
+            # provider_request["reasoning_effort"] = effort
             response, finish_reason, completion_tokens = llm_call(
                 client=client,
                 provider_request=provider_request,

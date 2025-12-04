@@ -98,7 +98,7 @@ class TestHTTPClientSSLConfiguration(unittest.TestCase):
         server_config.clear()
         server_config.update(self.original_config)
 
-    @patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'})
+    @patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key', 'OPTILLM_API_KEY': ''})
     def test_httpx_client_ssl_verify_disabled(self):
         """Test httpx.Client created with verify=False when SSL disabled."""
         from optillm.server import get_config
@@ -114,7 +114,7 @@ class TestHTTPClientSSLConfiguration(unittest.TestCase):
             # Verify httpx.Client was called with verify=False
             mock_httpx_client.assert_called_once_with(verify=False)
 
-    @patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'})
+    @patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key', 'OPTILLM_API_KEY': ''})
     def test_httpx_client_ssl_verify_enabled(self):
         """Test httpx.Client created with verify=True by default."""
         from optillm.server import get_config
@@ -130,7 +130,7 @@ class TestHTTPClientSSLConfiguration(unittest.TestCase):
             # Verify httpx.Client was called with verify=True
             mock_httpx_client.assert_called_once_with(verify=True)
 
-    @patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'})
+    @patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key', 'OPTILLM_API_KEY': ''})
     def test_httpx_client_custom_cert_path(self):
         """Test httpx.Client created with custom certificate path."""
         from optillm.server import get_config
@@ -147,7 +147,7 @@ class TestHTTPClientSSLConfiguration(unittest.TestCase):
             # Verify httpx.Client was called with custom cert path
             mock_httpx_client.assert_called_once_with(verify=test_cert_path)
 
-    @patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'})
+    @patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key', 'OPTILLM_API_KEY': ''})
     def test_openai_client_receives_http_client(self):
         """Test that OpenAI client receives the configured httpx client."""
         from optillm.server import get_config
@@ -168,46 +168,7 @@ class TestHTTPClientSSLConfiguration(unittest.TestCase):
             self.assertIn('http_client', call_kwargs)
             self.assertEqual(call_kwargs['http_client'], mock_http_client_instance)
 
-    @patch.dict(os.environ, {'CEREBRAS_API_KEY': 'test-key'})
-    def test_cerebras_client_receives_http_client(self):
-        """Test that Cerebras client receives the configured httpx client."""
-        from optillm.server import get_config
-
-        server_config['ssl_verify'] = False
-        server_config['ssl_cert_path'] = ''
-        server_config['base_url'] = ''
-
-        mock_http_client_instance = MagicMock()
-
-        with patch('httpx.Client', return_value=mock_http_client_instance) as mock_httpx_client, \
-             patch('optillm.server.Cerebras') as mock_cerebras:
-            get_config()
-
-            # Verify Cerebras was called with http_client parameter
-            mock_cerebras.assert_called_once()
-            call_kwargs = mock_cerebras.call_args[1]
-            self.assertIn('http_client', call_kwargs)
-            self.assertEqual(call_kwargs['http_client'], mock_http_client_instance)
-
-    @patch.dict(os.environ, {'AZURE_OPENAI_API_KEY': 'test-key', 'AZURE_API_VERSION': '2024-02-15-preview', 'AZURE_API_BASE': 'https://test.openai.azure.com'})
-    def test_azure_client_receives_http_client(self):
-        """Test that AzureOpenAI client receives the configured httpx client."""
-        from optillm.server import get_config
-
-        server_config['ssl_verify'] = False
-        server_config['ssl_cert_path'] = ''
-
-        mock_http_client_instance = MagicMock()
-
-        with patch('httpx.Client', return_value=mock_http_client_instance) as mock_httpx_client, \
-             patch('optillm.server.AzureOpenAI') as mock_azure:
-            get_config()
-
-            # Verify AzureOpenAI was called with http_client parameter
-            mock_azure.assert_called_once()
-            call_kwargs = mock_azure.call_args[1]
-            self.assertIn('http_client', call_kwargs)
-            self.assertEqual(call_kwargs['http_client'], mock_http_client_instance)
+    
 
 
 class TestPluginSSLConfiguration(unittest.TestCase):
@@ -308,7 +269,7 @@ class TestSSLWarnings(unittest.TestCase):
         server_config.clear()
         server_config.update(self.original_config)
 
-    @patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'})
+    @patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key', 'OPTILLM_API_KEY': ''})
     def test_warning_when_ssl_disabled(self):
         """Test that a warning is logged when SSL verification is disabled."""
         from optillm.server import get_config
@@ -328,7 +289,7 @@ class TestSSLWarnings(unittest.TestCase):
             self.assertIn('SSL certificate verification is DISABLED', warning_message)
             self.assertIn('insecure', warning_message.lower())
 
-    @patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'})
+    @patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key', 'OPTILLM_API_KEY': ''})
     def test_info_when_custom_cert_used(self):
         """Test that an info message is logged when using custom certificate."""
         from optillm.server import get_config

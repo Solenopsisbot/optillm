@@ -5,8 +5,7 @@ import secrets
 import time
 from pathlib import Path
 from flask import Flask, request, jsonify
-from cerebras.cloud.sdk import Cerebras
-from openai import AzureOpenAI, OpenAI
+from openai import OpenAI
 from flask import Response
 import json
 import importlib
@@ -58,73 +57,65 @@ request_batcher = None
 # Global conversation logger (initialized in main() if logging enabled)
 conversation_logger = None
 
-def get_config():
+def create_http_client():
+    """
+    Create an httpx.Client instance based on SSL settings in server_config.
+    """
     import httpx
 
-    API_KEY = None
-
-    # Create httpx client with SSL configuration
     ssl_verify = server_config.get('ssl_verify', True)
     ssl_cert_path = server_config.get('ssl_cert_path', '')
 
-    # Determine SSL verification setting
     if not ssl_verify:
-        logger.warning("SSL certificate verification is DISABLED. This is insecure and should only be used for development.")
-        http_client = httpx.Client(verify=False)
-    elif ssl_cert_path:
-        logger.info(f"Using custom CA certificate bundle: {ssl_cert_path}")
-        http_client = httpx.Client(verify=ssl_cert_path)
-    else:
-        http_client = httpx.Client(verify=True)
+        logger.warning(
+            "SSL certificate verification is DISABLED. "
+            "This is insecure and should only be used for development."
+        )
+        return httpx.Client(verify=False)
 
+    if ssl_cert_path:
+        logger.info(f"Using custom CA certificate bundle: {ssl_cert_path}")
+        return httpx.Client(verify=ssl_cert_path)
+
+    return httpx.Client(verify=True)
+
+
+def get_config():
+    """
+    Return a default client and API key.
+
+    In local inference mode (OPTILLM_API_KEY set), this returns an InferenceClient.
+    Otherwise, it uses providers.json and returns a client for the first configured provider.
+    """
+    API_KEY = None
+
+    # Local inference mode: use the built-in inference engine
     if os.environ.get("OPTILLM_API_KEY"):
-        # Use local inference engine
         from optillm.inference import create_inference_client
+
         API_KEY = os.environ.get("OPTILLM_API_KEY")
         default_client = create_inference_client()
-    # Cerebras, OpenAI, Azure, or LiteLLM API configuration
-    elif os.environ.get("CEREBRAS_API_KEY"):
-        API_KEY = os.environ.get("CEREBRAS_API_KEY")
-        base_url = server_config['base_url']
-        if base_url != "":
-            default_client = Cerebras(api_key=API_KEY, base_url=base_url, http_client=http_client)
-        else:
-            default_client = Cerebras(api_key=API_KEY, http_client=http_client)
-    elif os.environ.get("OPENAI_API_KEY"):
-        API_KEY = os.environ.get("OPENAI_API_KEY")
-        base_url = server_config['base_url']
-        if base_url != "":
-            default_client = OpenAI(api_key=API_KEY, base_url=base_url)
-            logger.info(f"Created OpenAI client with base_url: {base_url}")
-        else:
-            default_client = OpenAI(api_key=API_KEY)
-            logger.info("Created OpenAI client without base_url")
-    elif os.environ.get("AZURE_OPENAI_API_KEY"):
-        API_KEY = os.environ.get("AZURE_OPENAI_API_KEY")
-        API_VERSION = os.environ.get("AZURE_API_VERSION")
-        AZURE_ENDPOINT = os.environ.get("AZURE_API_BASE")
-        if API_KEY is not None:
-            default_client = AzureOpenAI(
-                api_key=API_KEY,
-                api_version=API_VERSION,
-                azure_endpoint=AZURE_ENDPOINT,
-                http_client=http_client
-            )
-        else:
-            from azure.identity import DefaultAzureCredential, get_bearer_token_provider
-            azure_credential = DefaultAzureCredential()
-            token_provider = get_bearer_token_provider(azure_credential, "https://cognitiveservices.azure.com/.default")
-            default_client = AzureOpenAI(
-                api_version=API_VERSION,
-                azure_endpoint=AZURE_ENDPOINT,
-                azure_ad_token_provider=token_provider,
-                http_client=http_client
-            )
-    else:
-        # Import the LiteLLM wrapper
-        from optillm.litellm_wrapper import LiteLLMWrapper
-        default_client = LiteLLMWrapper()
-        logger.info("Created LiteLLMWrapper as fallback")
+        logger.info("Created local inference client from OPTILLM_API_KEY")
+        logger.info(f"Client type: {type(default_client)}")
+        return default_client, API_KEY
+
+    # Remote/provider mode: require providers.json
+    providers = load_providers_config()
+    if not providers:
+        logger.error(
+            "No providers configured. "
+            "Create providers.json or set OPTILLM_API_KEY for local inference."
+        )
+        raise RuntimeError(
+            "No providers configured. "
+            "Create providers.json or set OPTILLM_API_KEY for local inference."
+        )
+
+    # Pick a default provider: explicit 'default' if present, otherwise the first one
+    provider_name = "default" if "default" in providers else next(iter(providers.keys()))
+    http_client = create_http_client()
+    default_client = get_provider_client(provider_name, http_client=http_client)
+    logger.info(f"Created default client for provider '{provider_name}' from providers.json")
     logger.info(f"Client type: {type(default_client)}")
     return default_client, API_KEY
 
@@ -679,6 +670,97 @@ def check_api_key():
         if not secrets.compare_digest(client_key, server_config['optillm_api_key']):
             return jsonify({"error": "Invalid API key"}), 401
 
+# Provider configuration (providers.json) -------------------------------------
+
+providers_config_cache: Optional[Dict[str, Any]] = None
+provider_clients_cache: Dict[str, Any] = {}
+
+
+def load_providers_config() -> Dict[str, Any]:
+    """
+    Load providers configuration from providers.json if present.
+
+    The file is expected to contain a mapping from provider slug to a dict with:
+      - "base_url": OpenAI-compatible base URL
+      - "api_key_env": name of the environment variable storing the API key
+    """
+    global providers_config_cache
+
+    if providers_config_cache is not None:
+        return providers_config_cache
+
+    config_path_env = os.environ.get("OPTILLM_PROVIDERS_FILE")
+    candidate_paths = []
+
+    if config_path_env:
+        candidate_paths.append(Path(config_path_env))
+
+    candidate_paths.append(Path.cwd() / "providers.json")
+    candidate_paths.append(Path.home() / ".optillm" / "providers.json")
+
+    for path in candidate_paths:
+        try:
+            if path.is_file():
+                with open(path, "r", encoding="utf-8") as f:
+                    raw = json.load(f)
+                if not isinstance(raw, dict):
+                    logger.error(
+                        f"providers.json at {path} must be a JSON object mapping provider names to configs"
+                    )
+                    providers_config_cache = {}
+                    return providers_config_cache
+                providers_config_cache = raw
+                logger.info(
+                    "Loaded providers configuration from %s with providers: %s",
+                    path,
+                    ", ".join(providers_config_cache.keys()) or "(none)",
+                )
+                return providers_config_cache
+        except Exception as e:
+            logger.error(f"Failed to load providers.json from {path}: {e}")
+
+    providers_config_cache = {}
+    return providers_config_cache
+
+
+def get_provider_client(provider_name: str, http_client=None):
+    """
+    Return an OpenAI client for the given provider slug using providers.json configuration.
+    """
+    providers = load_providers_config()
+    config = providers.get(provider_name)
+    if config is None:
+        raise ValueError(f"Unknown provider '{provider_name}'. Configure it in providers.json")
+
+    base_url = config.get("base_url")
+    api_key_env = (
+        config.get("api_key_env")
+        or config.get("apiKeyEnv")
+        or config.get("env_key")
+        or config.get("api_key_env_var")
+    )
+    if not api_key_env:
+        raise ValueError(f"Provider '{provider_name}' config must include 'api_key_env'")
+
+    api_key = os.environ.get(api_key_env)
+    if not api_key:
+        raise ValueError(
+            f"Environment variable '{api_key_env}' for provider '{provider_name}' is not set"
+        )
+
+    client = provider_clients_cache.get(provider_name)
+    if client is None:
+        client_kwargs = {"api_key": api_key}
+        if base_url:
+            client_kwargs["base_url"] = base_url
+        if http_client is None:
+            http_client = create_http_client()
+        client_kwargs["http_client"] = http_client
+        client = OpenAI(**client_kwargs)
+        provider_clients_cache[provider_name] = client
+    return client
+
+
 @app.route('/v1/chat/completions', methods=['POST'])
 def proxy():
     logger.info('Received request to /v1/chat/completions')
@@ -694,7 +776,9 @@ def proxy():
 
     stream = data.get('stream', False)
     messages = data.get('messages', [])
-    model = data.get('model', server_config['model'])
+    model = data.get('model')
+    if not model:
+        return jsonify({"error": "Field 'model' is required"}), 400
     n = data.get('n', server_config['n'])  # Get n value from request or config
     # Extract response_format if present
     response_format = data.get("response_format", None)
@@ -741,10 +825,21 @@ def proxy():
     if optillm_approach != "auto":
         model = f"{optillm_approach}-{model}"
 
-    base_url = server_config['base_url']
     default_client, api_key = get_config()
 
     operation, approaches, model = parse_combined_approach(model, known_approaches, plugin_approaches)
+
+    # Determine provider from model id in the form "provider/model" (for remote mode).
+    # Local inference mode (OPTILLM_API_KEY set) ignores provider prefixes so that
+    # Hugging Face-style model IDs like "google/gemma-3-270m-it" continue to work.
+    provider_name = None
+    if not os.environ.get("OPTILLM_API_KEY"):
+        providers_cfg = load_providers_config()
+        if providers_cfg and "/" in model:
+            potential_provider, remainder = model.split("/", 1)
+            if potential_provider in providers_cfg:
+                provider_name = potential_provider
+                model = remainder
 
     # Start conversation logging if enabled
     request_id = None
@@ -767,13 +862,14 @@ def proxy():
     if request_id:
         logger.info(f'Request {request_id}: Starting processing')
 
-    if bearer_token != "" and bearer_token.startswith("sk-"):
-        api_key = bearer_token
-        if base_url != "":
-            client = OpenAI(api_key=api_key, base_url=base_url)
-        else:
-            client = OpenAI(api_key=api_key)
-    else: 
+    if provider_name:
+        # Use provider-specific client from providers.json
+        try:
+            client = get_provider_client(provider_name)
+        except Exception as e:
+            logger.error(f"Failed to create client for provider '{provider_name}': {e}")
+            client = default_client
+    else:
         client = default_client
 
     try:
@@ -926,37 +1022,69 @@ def proxy():
 @app.route('/v1/models', methods=['GET'])
 def proxy_models():
     logger.info('Received request to /v1/models')
-    default_client, API_KEY = get_config()
-    try:
-        if server_config['base_url']:
-            client = OpenAI(api_key=API_KEY, base_url=server_config['base_url'])
-            # For external API, fetch models using the OpenAI client
-            models_response = client.models.list()
-            # Convert to dict format
-            models_data = {
-                "object": "list",
-                "data": [model.dict() for model in models_response.data]
-            }
-        else:
-            # For local inference, create a models response manually
-            current_model = server_config.get('model', 'gpt-3.5-turbo')
-            models_data = {
-                "object": "list", 
-                "data": [
-                    {
-                        "id": current_model,
-                        "object": "model",
-                        "created": 1677610602,
-                        "owned_by": "optillm"
-                    }
-                ]
-            }
 
-        logger.debug('Models retrieved successfully')
+    # Local inference mode: delegate to inference client models.list() if available
+    if os.environ.get("OPTILLM_API_KEY"):
+        try:
+            default_client, API_KEY = get_config()
+            models_data = {"object": "list", "data": []}
+            if hasattr(default_client, "models") and hasattr(default_client.models, "list"):
+                models_response = default_client.models.list()
+                if isinstance(models_response, dict):
+                    # InferenceClient already returns OpenAI-compatible dict
+                    models_data = models_response
+                elif hasattr(models_response, "data"):
+                    models_data["data"] = [
+                        m.model_dump() if hasattr(m, "model_dump") else m.dict()
+                        for m in models_response.data
+                    ]
+            logger.debug('Models retrieved successfully (local inference)')
+            return jsonify(models_data), 200
+        except Exception as e:
+            logger.error(f"Error fetching models from local inference client: {str(e)}")
+            return jsonify({"error": f"Error fetching models from local inference client: {str(e)}"}), 500
+
+    # Remote/provider mode: aggregate models from all configured providers using providers.json
+    models_data = {"object": "list", "data": []}
+    providers_cfg = load_providers_config()
+    if providers_cfg:
+        for provider_name in providers_cfg.keys():
+            try:
+                client = get_provider_client(provider_name)
+                response = client.models.list()
+
+                if hasattr(response, "data"):
+                    source_models = response.data
+                elif isinstance(response, dict):
+                    source_models = response.get("data", [])
+                else:
+                    source_models = response or []
+
+                for m in source_models:
+                    if hasattr(m, "model_dump"):
+                        mdict = m.model_dump()
+                    elif hasattr(m, "dict"):
+                        mdict = m.dict()
+                    else:
+                        mdict = dict(m)
+                    model_id = mdict.get("id")
+                    if not model_id:
+                        continue
+                    mdict["id"] = f"{provider_name}/{model_id}"
+                    mdict.setdefault("owned_by", provider_name)
+                    models_data["data"].append(mdict)
+            except Exception as e:
+                logger.error(f"Error fetching models from provider {provider_name}: {e}")
+
+        logger.debug('Aggregated models retrieved successfully from providers.json')
         return jsonify(models_data), 200
-    except Exception as e:
-        logger.error(f"Error fetching models: {str(e)}")
-        return jsonify({"error": f"Error fetching models: {str(e)}"}), 500
+
+    # No providers configured and not in local mode
+    logger.error(
+        "No providers configured for /v1/models. "
+        "Create providers.json or set OPTILLM_API_KEY for local inference."
+    )
+    return jsonify(models_data), 200
 
 @app.route('/health', methods=['GET'])
 def health():

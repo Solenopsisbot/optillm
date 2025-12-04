@@ -51,15 +51,17 @@ class Provider:
                 # Google AI with standard OpenAI-compatible client
                 self._client = OpenAI(
                     api_key=self.api_key,
-                    base_url=self.base_url,
-                    max_retries=0  # Disable client retries - we handle them
+                    base_url=self. base_url,
+                    max_retries=0,
+                    timeout=3600  # or read from config
                 )
             else:
                 # Standard OpenAI-compatible client
                 self._client = OpenAI(
                     api_key=self.api_key,
-                    base_url=self.base_url,
-                    max_retries=0  # Disable client retries - we handle them
+                    base_url=self. base_url,
+                    max_retries=0,
+                    timeout=3600  # or read from config
                 )
         return self._client
     

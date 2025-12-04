@@ -545,9 +545,9 @@ def _synthesize_final_solution(
             temperature=0.3,  # Lower temperature for synthesis
             timeout=300,
             extra_body={
-                "reasoning": {
-                    "effort": "high"  # High effort for final synthesis
-                }
+                # "reasoning": {
+                #     "effort": "high"  # High effort for final synthesis
+                # }
             }
         )
 
@@ -562,9 +562,9 @@ def _synthesize_final_solution(
                 "max_tokens": config['max_tokens'],
                 "temperature": 0.3,
                 "extra_body": {
-                    "reasoning": {
-                        "effort": "high"
-                    }
+                    # "reasoning": {
+                    #     "effort": "high"
+                    # }
                 }
             }
             response_dict = response.model_dump() if hasattr(response, 'model_dump') else response

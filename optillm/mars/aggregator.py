@@ -259,11 +259,11 @@ class MARSAggregator:
                 max_tokens=self.max_tokens,
                 temperature=0.7,  # Slightly higher temperature for creativity in aggregation
                 timeout=300,
-                extra_body={
-                    "reasoning": {
-                        "effort": "high"
-                    }
-                }
+                # extra_body={
+                #     "reasoning": {
+                #         "effort": "high"
+                #     }
+                # }
             )
 
             # Log provider call if conversation logging is enabled
@@ -276,11 +276,11 @@ class MARSAggregator:
                     ],
                     "max_tokens": self.max_tokens,
                     "temperature": 0.7,
-                    "extra_body": {
-                        "reasoning": {
-                            "effort": "high"
-                        }
-                    }
+                    # "extra_body": {
+                    #     "reasoning": {
+                    #         "effort": "high"
+                    #     }
+                    # }
                 }
                 response_dict = response.model_dump() if hasattr(response, 'model_dump') else response
                 conversation_logger.log_provider_call(request_id, provider_request, response_dict)

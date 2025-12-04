@@ -1,0 +1,10 @@
+{
+  "orchestrator": {
+    "base_url": "https://openai-orchestrator.solenopsisbot.workers.dev/v1",
+    "api_key_env": "ORCHESTRATOR_API_KEY"
+  },
+  "cerebras": {
+    "base_url": "https://api.cerebras.ai/v1",
+    "api_key_env": "CEREBRAS_API_KEY"
+  }
+}
