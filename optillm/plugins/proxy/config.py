@@ -63,6 +63,9 @@ class ProxyConfig:
             # Interpolate environment variables
             config = cls._interpolate_env_vars(config)
             
+            # Attach providers from global providers.json if available
+            config = cls._attach_providers_from_providers_json(config)
+            
             # Apply defaults and validate
             config = cls._apply_defaults(config)
             config = cls._validate_config(config)
@@ -121,6 +124,74 @@ class ProxyConfig:
             return [ProxyConfig._interpolate_env_vars(item) for item in obj]
             
         return obj
+    
+    @staticmethod
+    def _attach_providers_from_providers_json(config: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Populate config['providers'] from providers.json if available.
+
+        This makes providers.json the single source of truth for provider
+        connection details (base_url + API key env var) that is shared with
+        the core server. If providers.json is missing or empty, the existing
+        'providers' section from the YAML config is left unchanged for
+        backwards compatibility, but new setups should prefer providers.json.
+        """
+        try:
+            from optillm.server import load_providers_config
+        except Exception as e:
+            logger.debug(f"Could not import load_providers_config from optillm.server: {e}")
+            return config
+
+        providers_cfg = load_providers_config()
+        if not providers_cfg:
+            return config
+
+        providers = []
+        for name, p_cfg in providers_cfg.items():
+            base_url = p_cfg.get("base_url")
+            api_key_env = (
+                p_cfg.get("api_key_env")
+                or p_cfg.get("apiKeyEnv")
+                or p_cfg.get("env_key")
+                or p_cfg.get("api_key_env_var")
+            )
+            if not base_url or not api_key_env:
+                logger.warning(
+                    f"Skipping provider '{name}' from providers.json; "
+                    f"missing 'base_url' or 'api_key_env'"
+                )
+                continue
+
+            api_key = os.environ.get(api_key_env)
+            if not api_key:
+                logger.warning(
+                    f"Environment variable '{api_key_env}' for provider '{name}' is not set; "
+                    "this provider will be skipped by the proxy plugin"
+                )
+                continue
+
+            provider_entry = {
+                "name": name,
+                "base_url": base_url,
+                "api_key": api_key,
+            }
+
+            # Proxy-specific optional settings may be provided directly in providers.json
+            for field in ("weight", "fallback_only", "model_map", "max_concurrent"):
+                if field in p_cfg:
+                    provider_entry[field] = p_cfg[field]
+
+            providers.append(provider_entry)
+
+        if providers:
+            if config.get("providers"):
+                logger.info(
+                    "Using providers from providers.json instead of "
+                    "proxy_config.yaml 'providers' section"
+                )
+            config["providers"] = providers
+
+        return config
     
     @staticmethod
     def _apply_defaults(config: Dict) -> Dict:
@@ -226,12 +297,19 @@ class ProxyConfig:
         default = """# OptiLLM Proxy Plugin Configuration
 # 
 # This is an auto-generated configuration file.
-# Add your LLM provider endpoints and API keys below.
+# Provider connection details (base_url, API key env var) are now
+# configured globally in providers.json and shared with the core
+# server. See providers.example.json at the project root for an example.
+#
+# You typically only need this file to tune proxy-specific behaviour
+# such as routing strategy, health checks, timeouts, and queue limits.
 # 
 # Environment variables are supported: ${VAR_NAME} or ${VAR_NAME:-default_value}
 
 providers:
-  # Example OpenAI provider (uncomment and configure)
+  # NOTE: When providers.json is present, its entries will override this
+  # section. Defining providers here is only needed for legacy setups
+  # that do not use providers.json.
   # - name: openai_primary
   #   base_url: https://api.openai.com/v1
   #   api_key: ${OPENAI_API_KEY}
@@ -261,7 +339,8 @@ monitoring:
 """
         path.write_text(default)
         logger.info(f"Created default proxy config at {path}")
-        logger.info("Please configure your providers in this file")
+        logger.info("Proxy providers are now configured via providers.json; "
+                    "this file controls routing, timeouts, and queue settings.")
     
     @staticmethod
     def _get_minimal_config() -> Dict:

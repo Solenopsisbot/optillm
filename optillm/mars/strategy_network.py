@@ -179,11 +179,11 @@ SUCCESS_INDICATORS: [indicator1], [indicator2]"""
                 max_tokens=self.max_tokens // 4,  # Use 1/4 of token budget for strategy extraction
                 temperature=0.3,
                 timeout=120,
-                extra_body={
-                    "reasoning": {
-                        "effort": "medium"
-                    }
-                }
+                # extra_body={
+                #     "reasoning": {
+                #         "effort": "medium"
+                #     }
+                # }
             )
 
             # Log provider call if conversation logging is enabled
@@ -196,7 +196,7 @@ SUCCESS_INDICATORS: [indicator1], [indicator2]"""
                     ],
                     "max_tokens": self.max_tokens // 4,
                     "temperature": 0.3,
-                    "extra_body": {"reasoning": {"effort": "medium"}}
+                    # "extra_body": {"reasoning": {"effort": "medium"}}
                 }
                 response_dict = response.model_dump() if hasattr(response, 'model_dump') else response
                 conversation_logger.log_provider_call(request_id, provider_request, response_dict)
@@ -360,11 +360,11 @@ Respond with just the category name."""
                 max_tokens=50,
                 temperature=0.1,
                 timeout=60,
-                extra_body={
-                    "reasoning": {
-                        "effort": "low"
-                    }
-                }
+                # extra_body={
+                #     "reasoning": {
+                #         "effort": "low"
+                #     }
+                # }
             )
 
             classification = response.choices[0].message.content.strip().lower()
@@ -478,11 +478,11 @@ Enhanced Solution:"""
                 max_tokens=self.max_tokens,
                 temperature=original_solution.temperature * 0.9,  # Slightly lower for focused enhancement
                 timeout=300,
-                extra_body={
-                    "reasoning": {
-                        "effort": "high"
-                    }
-                }
+                # extra_body={
+                #     "reasoning": {
+                #         "effort": "high"
+                #     }
+                # }
             )
 
             # Log provider call if conversation logging is enabled
@@ -495,7 +495,7 @@ Enhanced Solution:"""
                     ],
                     "max_tokens": self.max_tokens,
                     "temperature": original_solution.temperature * 0.9,
-                    "extra_body": {"reasoning": {"effort": "high"}}
+                    # "extra_body": {"reasoning": {"effort": "high"}}
                 }
                 response_dict = response.model_dump() if hasattr(response, 'model_dump') else response
                 conversation_logger.log_provider_call(request_id, provider_request, response_dict)

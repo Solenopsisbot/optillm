@@ -45,8 +45,23 @@ Get powerful reasoning improvements in 3 simple steps:
 pip install optillm
 
 # 2. Start the server
-export OPENAI_API_KEY="your-key-here"
+
+# Option A: Local inference (Hugging Face models, no external API)
+export OPTILLM_API_KEY="optillm"
 optillm
+
+# Option B: Remote OpenAI-compatible provider via providers.json
+# 1) Create providers.json (or ~/.optillm/providers.json), e.g.:
+# {
+#   "openai": {
+#     "base_url": "https://api.openai.com/v1",
+#     "api_key_env": "OPENAI_API_KEY"
+#   }
+# }
+# 2) Set the matching env var:
+# export OPENAI_API_KEY="your-openai-key"
+# 3) Start the server:
+# optillm
 
 # 3. Use with any OpenAI client - just change the model name!
 ```
@@ -200,16 +215,64 @@ optillm
 | [Deep Research](optillm/plugins/deep_research)           | `deep_research`    | Implements Test-Time Diffusion Deep Researcher (TTD-DR) for comprehensive research reports using iterative refinement |
 | [Proxy](optillm/plugins/proxy)      | `proxy`            | Load balancing and failover across multiple LLM providers with health monitoring and round-robin routing |
 
-We support all major LLM providers and models for inference. You need to set the correct environment variable and the proxy will pick the corresponding client.
+We support all major LLM providers and models for inference. Provider
+connection details are configured centrally in a single `providers.json`
+file, which is shared between the core server and the proxy plugin.
 
-| Provider | Required Environment Variables | Additional Notes |
-|----------|-------------------------------|------------------|
-| OptiLLM | `OPTILLM_API_KEY` | Uses the inbuilt local server for inference, supports logprobs and decoding techniques like `cot_decoding` & `entropy_decoding` |
-| OpenAI | `OPENAI_API_KEY` | You can use this with any OpenAI compatible endpoint (e.g. OpenRouter) by setting the `base_url` |
-| Cerebras | `CEREBRAS_API_KEY` | You can use this for fast inference with supported models, see [docs for details](https://inference-docs.cerebras.ai/introduction) |
-| Azure OpenAI | `AZURE_OPENAI_API_KEY`<br>`AZURE_API_VERSION`<br>`AZURE_API_BASE` | - |
-| Azure OpenAI (Managed Identity) | `AZURE_API_VERSION`<br>`AZURE_API_BASE` | Login required using `az login`, see [docs for details](https://learn.microsoft.com/en-us/azure/ai-services/openai/how-to/managed-identity) |
-| LiteLLM | depends on the model | See [docs for details](https://docs.litellm.ai/docs/providers) |
+### Provider configuration (`providers.json`)
+
+When running against remote APIs (OpenAI, OpenRouter, LiteLLM proxy,
+Azure-compatible gateways, etc.), you configure providers in
+`providers.json`. The server searches for this file in the following order:
+
+1. Path from `OPTILLM_PROVIDERS_FILE` (if set)
+2. `./providers.json` (current working directory)
+3. `~/.optillm/providers.json`
+
+Each entry maps a provider slug to a configuration object:
+
+```json
+{
+  "openai": {
+    "base_url": "https://api.openai.com/v1",
+    "api_key_env": "OPENAI_API_KEY"
+  },
+  "openrouter": {
+    "base_url": "https://openrouter.ai/api/v1",
+    "api_key_env": "OPENROUTER_API_KEY"
+  }
+}
+```
+
+At runtime you then set the corresponding environment variables, e.g.:
+
+```bash
+export OPENAI_API_KEY="sk-..."
+export OPENROUTER_API_KEY="..."
+python optillm.py
+```
+
+You can reference providers by prefixing the model with the provider name,
+for example:
+
+- `openai/gpt-4.1-mini`
+- `openrouter/meta-llama-3-8b-instruct`
+
+When using local inference (`OPTILLM_API_KEY` set), `providers.json` is not
+required and Hugging Face-style IDs like `google/gemma-3-270m-it` are used
+directly as model names.
+
+The table below shows typical environment variables you might use in the
+`api_key_env` field for common providers:
+
+| Provider | Recommended `api_key_env` | Additional Notes |
+|----------|---------------------------|------------------|
+| OptiLLM (local inference) | `OPTILLM_API_KEY` | Uses the inbuilt local server for inference, supports logprobs and decoding techniques like `cot_decoding` & `entropy_decoding` |
+| OpenAI | `OPENAI_API_KEY` | Point `base_url` to any OpenAI-compatible endpoint (e.g. OpenAI, Azure-compatible gateways, OpenRouter, or a LiteLLM proxy) |
+| Cerebras | `CEREBRAS_API_KEY` | Set `base_url` to the Cerebras inference endpoint; see [docs](https://inference-docs.cerebras.ai/introduction) |
+| Azure OpenAI | `AZURE_OPENAI_API_KEY` | Use an Azure-compatible gateway that exposes an OpenAI-style `/v1` endpoint |
+| Azure OpenAI (Managed Identity) | `AZURE_OPENAI_MANAGED_IDENTITY` (custom) | For managed identity flows, configure your gateway to accept a token from this env var |
+| LiteLLM proxy | `LITELLM_API_KEY` (or custom) | Run a LiteLLM proxy and point `base_url` at it; see [LiteLLM docs](https://docs.litellm.ai/docs/providers) |
 
 You can then run the optillm proxy as follows.
 
@@ -289,24 +352,26 @@ response = client.chat.completions.create(
 
 Please note that the convention described above works only when the optillm server has been started with inference approach set to `auto`. Otherwise, the `model` attribute in the client request must be set with the model name only.
 
-We now support all LLM providers (by wrapping around the [LiteLLM sdk](https://docs.litellm.ai/docs/#litellm-python-sdk)). E.g. you can use the Gemini Flash model with `moa` by setting passing the api key in the environment variable `os.environ['GEMINI_API_KEY']` and then calling the model `moa-gemini/gemini-1.5-flash-002`. In the output you will then see that LiteLLM is being used to call the base model.
+OptiLLM works with any provider that exposes an OpenAI-compatible `/v1`
+chat completions endpoint. You can point `base_url` in `providers.json` at:
 
-```bash
-9:43:21 - LiteLLM:INFO: utils.py:2952 -
-LiteLLM completion() model= gemini-1.5-flash-002; provider = gemini
-2024-09-29 19:43:21,011 - INFO -
-LiteLLM completion() model= gemini-1.5-flash-002; provider = gemini
-2024-09-29 19:43:21,481 - INFO - HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-002:generateContent?key=[redacted] "HTTP/1.1 200 OK"
-19:43:21 - LiteLLM:INFO: utils.py:988 - Wrapper: Completed Call, calling success_handler
-2024-09-29 19:43:21,483 - INFO - Wrapper: Completed Call, calling success_handler
-19:43:21 - LiteLLM:INFO: utils.py:2952 -
-LiteLLM completion() model= gemini-1.5-flash-002; provider = gemini
-```
+- Native OpenAI endpoints
+- Vendor gateways that emulate the OpenAI API
+- A self-hosted LiteLLM proxy
+- Local servers such as llama.cpp/ollama when wrapped by an OpenAI-style proxy
+
+For providers that do **not** expose an OpenAI-compatible API (for example,
+some raw Google or Anthropic endpoints), you can place a LiteLLM or similar
+proxy in front of them and then configure that proxy as a provider in
+`providers.json`.
 
 > [!TIP]
-> optillm is a transparent proxy and will work with any LLM API or provider that has an OpenAI API compatible chat completions endpoint, and in turn, optillm also exposes
-the same OpenAI API compatible chat completions endpoint. This should allow you to integrate it into any existing tools or frameworks easily. If the LLM you want to use
-doesn't have an OpenAI API compatible endpoint (like Google or Anthropic) you can use [LiteLLM proxy server](https://docs.litellm.ai/docs/proxy/quick_start) that supports most LLMs.
+> optillm is a transparent proxy and exposes the same OpenAI API compatible
+> chat completions endpoint. This allows you to integrate it into existing
+> tools and frameworks easily. For non-OpenAI-style backends, use an
+> OpenAI-compatible proxy such as the
+> [LiteLLM proxy server](https://docs.litellm.ai/docs/proxy/quick_start)
+> and register it in `providers.json`.
 
 The following sequence diagram illustrates how the request and responses go through optillm.
 
@@ -361,11 +426,36 @@ response = client.chat.completions.create(
 
 ### Starting the optillm proxy with an external server (e.g. llama.cpp or ollama)
 
-- Set the `OPENAI_API_KEY` env variable to a placeholder value
-  - e.g. `export OPENAI_API_KEY="sk-no-key"`
-- Run `./llama-server -c 4096 -m path_to_model` to start the server with the specified model and a context length of 4096 tokens
-- Run `python3 optillm.py --base_url base_url` to start the proxy
-  - e.g. for llama.cpp, run `python3 optillm.py --base_url http://localhost:8080/v1`
+Many local servers (llama.cpp, ollama, LM Studio, etc.) expose an
+OpenAI-compatible `/v1` API. To use them with OptiLLM:
+
+- Start your external server, e.g. for llama.cpp:
+
+  ```bash
+  ./llama-server -c 4096 -m path_to_model
+  ```
+
+- Create or update `providers.json` (or `~/.optillm/providers.json`) with a
+  provider that points at the external server:
+
+  ```json
+  {
+    "local-llama": {
+      "base_url": "http://localhost:8080/v1",
+      "api_key_env": "LLAMA_API_KEY"
+    }
+  }
+  ```
+
+- Set the corresponding environment variable (a placeholder value is fine if
+  your server does not enforce authentication):
+
+  ```bash
+  export LLAMA_API_KEY="sk-no-key"
+  python3 optillm.py
+  ```
+
+You can then call models via `local-llama/<model-id>` in the `model` field.
 
 > [!WARNING]
 > The Anthropic API, llama.cpp-server, and ollama currently do not support sampling multiple responses from a model, which limits the available approaches to the following:

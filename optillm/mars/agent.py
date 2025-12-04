@@ -76,9 +76,9 @@ class MARSAgent:
                 max_tokens=max_tokens,
                 temperature=self.temperature,
                 timeout=300,  # 5 minute timeout for complex problems
-                extra_body={
-                    "reasoning": reasoning_config
-                }
+                # extra_body={
+                #     "reasoning": reasoning_config
+                # }
             )
             api_duration = time.time() - api_start
             logger.info(f"🤖 AGENT {self.agent_id}: API call completed in {api_duration:.2f}s")
@@ -177,11 +177,11 @@ class MARSAgent:
                 max_tokens=max_tokens,
                 temperature=0.1,  # Low temperature for consistent verification
                 timeout=180,
-                extra_body={
-                    "reasoning": {
-                        "effort": "low"  # Low effort for verification consistency
-                    }
-                }
+                # extra_body={
+                #     "reasoning": {
+                #         "effort": "low"  # Low effort for verification consistency
+                #     }
+                # }
             )
             api_duration = time.time() - api_start
             logger.info(f"🔍 VERIFIER {self.agent_id}: Verification API call completed in {api_duration:.2f}s")
@@ -254,11 +254,11 @@ class MARSAgent:
                 max_tokens=max_tokens,
                 temperature=self.temperature * 0.8,  # Slightly lower temperature for improvement
                 timeout=300,
-                extra_body={
-                    "reasoning": {
-                        "effort": "high"  # High effort for improvements
-                    }
-                }
+                # extra_body={
+                #     "reasoning": {
+                #         "effort": "high"  # High effort for improvements
+                #     }
+                # }
             )
             api_duration = time.time() - api_start
             logger.info(f"🔧 IMPROVER {self.agent_id}: Improvement API call completed in {api_duration:.2f}s")

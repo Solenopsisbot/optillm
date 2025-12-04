@@ -23,28 +23,53 @@ optillm --version
 
 ## Quick Start
 
-### 1. Create Configuration
+### 1. Configure Providers (shared with the core server)
 
-Create `~/.optillm/proxy_config.yaml`:
+The proxy plugin shares the same `providers.json` configuration as the core
+OptiLLM server. This file is the **single source of truth** for provider
+connection details (base URL + API key env var).
+
+Create `~/.optillm/providers.json` (or point `OPTILLM_PROVIDERS_FILE` to it):
+
+```json
+{
+  "primary": {
+    "base_url": "https://api.openai.com/v1",
+    "api_key_env": "OPENAI_API_KEY",
+    "weight": 2,
+    "max_concurrent": 5,
+    "model_map": {
+      "gpt-4": "gpt-4-turbo-preview"
+    }
+  },
+  "backup": {
+    "base_url": "https://api.openai.com/v1",
+    "api_key_env": "OPENAI_API_KEY_BACKUP",
+    "weight": 1,
+    "max_concurrent": 2,
+    "fallback_only": true
+  }
+}
+```
+
+Fields like `weight`, `fallback_only`, `model_map`, and `max_concurrent` are
+respected by the proxy plugin. For more examples, see `providers.example.json`
+in the repo root.
+
+### 2. (Optional) Configure proxy-specific behaviour
+
+You can still create `~/.optillm/proxy_config.yaml` to tune routing strategy,
+health checks, timeouts, and queue limits. When `providers.json` is present,
+its providers override any `providers:` section in `proxy_config.yaml`
+(backwards compatible for existing setups).
 
 ```yaml
-providers:
-  - name: primary
-    base_url: https://api.openai.com/v1
-    api_key: ${OPENAI_API_KEY}
-    weight: 2
-    max_concurrent: 5  # Optional: limit this provider to 5 concurrent requests
-    model_map:
-      gpt-4: gpt-4-turbo-preview  # Optional: map model names
-    
-  - name: backup
-    base_url: https://api.openai.com/v1
-    api_key: ${OPENAI_API_KEY_BACKUP}
-    weight: 1
-    max_concurrent: 2  # Optional: limit this provider to 2 concurrent requests
-
 routing:
   strategy: weighted  # Options: weighted, round_robin, failover
+  health_check:
+    enabled: true
+    interval: 30  # seconds
+    timeout: 5    # seconds
 
 timeouts:
   request: 30  # Maximum seconds to wait for a provider response
@@ -52,10 +77,10 @@ timeouts:
 
 queue:
   max_concurrent: 100  # Maximum concurrent requests to prevent overload
-  timeout: 60         # Maximum seconds a request can wait in queue
+  timeout: 60          # Maximum seconds a request can wait in queue
 ```
 
-### 2. Start OptiLLM Server
+### 3. Start OptiLLM Server
 
 ```bash
 # Option A: Use proxy as default for ALL requests (recommended)
